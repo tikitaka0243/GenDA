@@ -4,71 +4,81 @@ Official code repository for the paper: *"Global 3D Ocean Data Assimilation with
 
 > GenDA is a probabilistic framework that combines **conditional flow matching** with **conformal prediction** to reconstruct global three-dimensional ocean temperature, salinity, and velocity fields from sparse Argo float profiles.
 
-## Overview
-
-Reconstructing three-dimensional ocean states from sparse observations is a fundamental challenge in oceanography. Existing approaches face three key limitations:
-
-1. **Deterministic methods** (trained with MSE) estimate the conditional mean and produce overly smooth fields that suppress mesoscale features
-2. **Heterogeneous data fusion** between sparse Lagrangian observations (Argo profiles) and gridded Eulerian fields remains challenging
-3. **Generative models** lack rigorous uncertainty quantification with finite-sample guarantees
-
-GenDA addresses all three challenges through:
-
-- **Conditional Flow Matching**: Models the full conditional distribution P(Y|X) rather than the conditional mean E[Y|X], preserving fine-scale ocean structures
-- **Location-Aware Attention**: Fuses sparse Argo profiles into spatially corresponding grid patches based on geographic coordinates (O(N) complexity w.r.t. number of profiles)
-- **Conformal Calibration**: Provides distribution-free, finite-sample coverage guarantees for continuous predictive distributions from generative models
-
-## Key Results
-
-Applied to global ocean reconstruction during 2012–2023:
-
-| Variable | Mean RMSE |
-|---|---|
-| Temperature | 0.86 °C |
-| Salinity | 0.23 PSU |
-| Eastward velocity | 0.12 m/s |
-| Northward velocity | 0.11 m/s |
-
-- Maintains spectral fidelity across scales from 10,000 km to 100 km
-- Recovers dynamics in data-sparse polar regions (Arctic/Antarctic)
-- Produces prediction intervals that attain nominal coverage levels after conformal calibration
 
 ## Requirements
 
-- Python >= 3.9
+- Python >= 3.13
 - PyTorch >= 2.0
 - xarray, numpy, pandas, matplotlib, cartopy
 - copernicusmarine (for data download)
 - argopy (for Argo data processing)
 
-Install dependencies:
+1. Create and activate the conda environment:
 
 ```bash
-pip install -r requirements.txt
+conda create -n genda python=3.13 -y
+conda activate genda
+```
+
+2. Install PyTorch (please visit [pytorch.org](https://pytorch.org) to select the appropriate version for your CUDA/driver setup).
+
+3. Install remaining dependencies:
+
+```bash
+pip install pyyaml tensorboard pandas xarray netcdf4 tqdm einops matplotlib cartopy
 ```
 
 ## Data Preparation
 
-### GLORYS12 Reanalysis Data
-
-Download GLORYS12 data from [Copernicus Marine Service](https://marine.copernicus.eu/):
+The dataset used in this project can be downloaded from [Google Drive](https://drive.google.com/drive/folders/1nb9PitgdqfqfEDaFVefGgf3HK8v4PZ14?usp=drive_link).
 
 ```bash
-python load_data.py --start-year 2012 --end-year 2023 --username YOUR_USERNAME --password YOUR_PASSWORD
+gdown --folder 1nb9PitgdqfqfEDaFVefGgf3HK8v4PZ14
 ```
 
-GLORYS12 provides daily global ocean state estimates at 1/12° (~8 km) horizontal resolution on 50 depth levels. This study uses the upper 40 depth levels (surface to 2000 m), consistent with the operational depth range of Argo floats.
+> **Note**: Due to Google Drive download quota limits, you may encounter the following error when using `gdown`:
+> ```
+> Too many users have viewed or downloaded this file recently. Please
+> try accessing the file again later. If the file you are trying to
+> access is particularly large or is shared with many people, it may
+> take up to 24 hours to be able to view or download the file.
+> ```
+> If this happens, please try again later or download the files manually via a browser.
 
-### Argo Float Data
+### Data Directory Structure
 
-The Argo data processing pipeline is included in `modules/datasets/load_argo.py`. See the `ArgoProcessorCSV` class for details. Argo profiles within a 5-day window (T−2 to T+2) are used as input for each day T.
+After downloading and extracting, the data directory should be organized as follows:
+
+```
+data/
+├── argo/
+│   └── argo_profiles_by_date/           # 5127 daily profile files
+│       ├── argo_profiles_2011-01-01.nc
+│       ├── argo_profiles_2011-01-02.nc
+│       └── ...                           # argo_profiles_YYYY-MM-DD.nc
+└── glorys12/
+    ├── train/                           # Training set (160720 files)
+    │   ├── 20110101_d00.nc
+    │   ├── 20110101_d01.nc
+    │   └── ...                           # YYYYMMDD_dXX.nc
+    ├── cal/                             # Calibration set (14600 files)
+    │   ├── 20220101_d00.nc
+    │   └── ...                           # YYYYMMDD_dXX.nc
+    ├── test/                            # Test set (14600 files)
+    │   ├── 20230101_d00.nc
+    │   └── ...                           # YYYYMMDD_dXX.nc
+    └── statistics_train.json            # Training statistics
+```
+
+- **GLORYS12**: Each `.nc` file (`YYYYMMDD_dXX.nc`) contains ocean state variables (temperature, salinity, velocity) for one ensemble member on one date. `dXX` denotes the ensemble member index.
+- **Argo**: `argo_profiles_by_date/` contains daily merged Argo float profiles in NetCDF format (`argo_profiles_YYYY-MM-DD.nc`).
 
 ## Quick Start
 
 ### Training
 
 ```bash
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 --master_port=29503 main.py --mode train
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 --master_port=29500 main.py --mode train
 ```
 
 ### Sampling
@@ -76,13 +86,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 --master_port=29503 mai
 Generate ensemble predictions using a trained model:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --master_port=29504 main.py --mode sample
-```
-
-### Using Custom Configuration
-
-```bash
-torchrun --nproc_per_node=1 main.py --mode train --config path/to/your/config.yaml
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 --master_port=29500 main.py --mode sample
 ```
 
 ## Configuration
@@ -105,27 +109,6 @@ The `--mode` argument automatically sets `evaluate_gen`:
 - `--mode train`: Sets `evaluate_gen=false` for training
 - `--mode sample`: Sets `evaluate_gen=true` for sampling
 
-## Method Details
-
-### Conditional Flow Matching
-
-GenDA adopts the flow matching framework to characterize the full conditional distribution P(Y|X). The model generates the ocean state at each depth level conditioned on Argo observations and depth, using x-prediction (clean data prediction) parameterization with optimal transport paths. Sampling is performed by solving the learned ODE from t=0 to t=1.
-
-### Location-Aware Attention
-
-For each Argo profile, the corresponding patch index on the grid is computed from geographic coordinates. Profile embeddings are then aggregated into their corresponding patches via scatter-add operations, reducing complexity from O(N·P) to O(N) compared to generic cross-attention.
-
-### Conformal Calibration
-
-A post-hoc calibration procedure provides finite-sample coverage guarantees for the continuous predictive distributions:
-1. Generate an ensemble of K predictions for each calibration sample
-2. Fit Gaussian KDEs to obtain uncalibrated CDFs at each spatial location
-3. Compute PIT (Probability Integral Transform) values
-4. Fit isotonic regression to correct miscalibration
-5. At test time, apply the calibration map to obtain calibrated prediction intervals at any confidence level (1−α)
-
-This guarantees: P(Y ∈ Ĉ_{1−α}) ≥ 1 − α − 1/(M+1), where M is the number of calibration samples.
-
 ## Output Directory
 
 Outputs are saved in timestamped directories:
@@ -133,54 +116,6 @@ Outputs are saved in timestamped directories:
 - Sampling output: `./output/results/sample_YYYYMMDD_HHMMSS/`
 
 The configuration file and code backup are automatically saved to the output directory for each run.
-
-## Project Structure
-
-```
-├── main.py                      # Entry point for training and sampling
-├── load_data.py                 # Data download and preprocessing
-├── post_process.py              # Post-processing utilities
-├── configs/
-│   └── configs.yaml             # Default configuration
-├── modules/
-│   ├── conformal.py             # Conformal calibration with isotonic regression
-│   ├── postprocess.py           # Post-processing functions
-│   ├── utils.py                 # Utility functions
-│   ├── datasets/
-│   │   ├── glorys12_dataset.py  # GLORYS12 + Argo dataset class
-│   │   ├── load_argo.py         # Argo data loader and processor
-│   │   └── load_glorys12.py     # GLORYS12 data downloader
-│   ├── flow_matching/
-│   │   ├── denoiser.py          # Flow matching clean data predictor (DANet)
-│   │   ├── engine.py            # Training and evaluation engine
-│   │   └── losses.py            # Flow matching loss functions
-│   ├── networks/
-│   │   ├── fibonacci.py         # Fibonacci sphere sampling
-│   │   └── model.py             # DANet model architecture
-│   ├── plot/
-│   │   ├── plot.py              # Visualization functions
-│   │   ├── plot_call.py         # Plot invocation helpers
-│   │   └── plot_conformal.py    # Conformal calibration plots
-│   └── util/
-│       ├── crop.py              # Data cropping utilities
-│       ├── lr_sched.py          # Learning rate schedulers
-│       ├── misc.py              # Miscellaneous utilities
-│       └── model_util.py        # Model utility functions
-```
-
-## Citation
-
-If you find this code useful, please consider citing our paper:
-
-```bibtex
-@article{genda2025,
-  title={Global 3D Ocean Data Assimilation with Conformalized Generative Models},
-  author={Anonymous},
-  journal={Journal of the American Statistical Association},
-  year={2025},
-  note={Under review}
-}
-```
 
 ## License
 

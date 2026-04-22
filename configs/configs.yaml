@@ -18,9 +18,9 @@ zero_land_output: true
 use_time_embed: false  # Whether to use cyclical time (date) embedding as additional conditioning
 
 # Training
-epochs: 200
+epochs: 50
 warmup_epochs: 1
-batch_size: 14
+batch_size: 25
 lr:  # Learning rate (absolute), null means calculated from blr
 blr: 5.0e-5  # Base learning rate: absolute_lr = base_lr * total_batch_size / 256
 min_lr: 0.0  # Minimum LR for cyclic schedulers that hit 0
@@ -42,7 +42,7 @@ pin_mem: true
 
 # Sampling
 evaluate_gen: true  # Set to true for sampling mode
-sampling_dataset: 'cal'  # Dataset to use for sampling: 'train', 'cal', or 'test'
+sampling_dataset: 'test'  # Dataset to use for sampling: 'train', 'cal', or 'test'
 sampling_method: 'heun'  # ODE sampling method
 num_sampling_steps: 50
 num_images: 100
@@ -67,7 +67,7 @@ normalization_method: 'zscore'  # 'minmax', 'quantile', or 'zscore'
 velocity_weight: 0.1  # Weight for velocity variables (uo, vo) during z-score standardization
 
 # Checkpointing
-output_dir: './output/results'  # Base output directory for checkpoints and logs
+output_dir: './output/results/genda'  # Base output directory for checkpoints and logs
 resume: null  # Folder that contains checkpoint to resume from. Set to null for fresh training.
 checkpoint_name: null  # Specific checkpoint file to load (e.g., 'checkpoint-49.pth'). Set to null for fresh training.
 run_prefix: null  # Custom prefix for output directory. null means auto: 'sample' for sampling, 'run' for training.

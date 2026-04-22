@@ -1,5 +1,6 @@
 # Data directories
 data/
+GenDA_data/
 GLOBAL_MULTIYEAR_PHY_001_030/
 
 # Output directories
