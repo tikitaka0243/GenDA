@@ -307,14 +307,36 @@ class OceanModelPipeline:
             total_size = len(dataset)
             subset_size = int(total_size * self.args.val_sample_ratio)
             if subset_size > 0:
+                from collections import defaultdict
+                import os
+                
+                # Group sample indices by date to preserve all depth layers per day
+                date_to_indices = defaultdict(list)
+                for idx, fp in enumerate(dataset.file_paths):
+                    filename = os.path.basename(fp)
+                    date_str = filename.split('_')[0]
+                    date_to_indices[date_str].append(idx)
+                
+                all_dates = sorted(date_to_indices.keys())
+                num_dates = len(all_dates)
+                num_dates_to_keep = max(1, int(num_dates * self.args.val_sample_ratio))
+                
                 # Set seed for reproducibility
                 seed = getattr(self.args, 'val_sample_seed', 42)
                 g = torch.Generator()
                 g.manual_seed(seed)
-                indices = torch.randperm(total_size, generator=g)[:subset_size].tolist()
+                perm = torch.randperm(num_dates, generator=g)
+                selected_dates = [all_dates[i] for i in perm[:num_dates_to_keep].tolist()]
+                
+                # Collect all indices for selected dates
+                indices = []
+                for date_key in selected_dates:
+                    indices.extend(date_to_indices[date_key])
+                indices.sort()  # Preserve original order
                 
                 dataset = torch.utils.data.Subset(dataset, indices)
-                print(f"Subsampled validation dataset: {subset_size}/{total_size} samples (seed={seed})")
+                print(f"Subsampled validation dataset: {len(indices)}/{total_size} samples "
+                      f"from {num_dates_to_keep}/{num_dates} dates (seed={seed})")
             else:
                 print(f"Warning: val_sample_ratio {self.args.val_sample_ratio} resulted in 0 samples. Using full dataset.")
         
@@ -515,8 +537,16 @@ class OceanModelPipeline:
 
 
 def parse_arguments():
-    """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description='Ocean Data Assimilation Model Training and Sampling')
+    """Parse command line arguments.
+    
+    In addition to --mode and --config, any parameter in the config YAML file
+    can be overridden from the command line using --key value syntax.
+    For example: --batch_size 16 --lr 1e-4 --epochs 100
+    """
+    parser = argparse.ArgumentParser(
+        description='Ocean Data Assimilation Model Training and Sampling',
+        # Allow unrecognized args so we can parse config overrides separately
+    )
     parser.add_argument(
         '--mode',
         type=str,
@@ -530,12 +560,71 @@ def parse_arguments():
         default='./configs/configs.yaml',
         help='Path to config file (default: ./configs/configs.yaml)'
     )
-    return parser.parse_args()
+    args, override_args = parser.parse_known_args()
+    return args, override_args
+
+
+def _infer_type(value_str):
+    """Infer the Python type of a string value for config overrides."""
+    # Handle boolean
+    if value_str.lower() in ('true', 'yes'):
+        return True
+    if value_str.lower() in ('false', 'no'):
+        return False
+    # Handle null/none
+    if value_str.lower() in ('null', 'none', '~'):
+        return None
+    # Handle int
+    try:
+        return int(value_str)
+    except ValueError:
+        pass
+    # Handle float
+    try:
+        return float(value_str)
+    except ValueError:
+        pass
+    # Default: string
+    return value_str
+
+
+def apply_overrides(config, override_args):
+    """Apply command-line overrides to the loaded config.
+    
+    Parses a list like ['--batch_size', '16', '--lr', '1e-4'] and overrides
+    the corresponding fields in the config namespace.
+    """
+    i = 0
+    overrides = {}
+    while i < len(override_args):
+        arg = override_args[i]
+        if arg.startswith('--'):
+            key = arg[2:]  # strip leading '--'
+            if i + 1 < len(override_args) and not override_args[i + 1].startswith('--'):
+                value = _infer_type(override_args[i + 1])
+                i += 2
+            else:
+                # Flag-style argument with no value, treat as True
+                value = True
+                i += 1
+            overrides[key] = value
+        else:
+            raise ValueError(f"Unexpected argument: {arg}. Use --key value format.")
+    
+    if overrides:
+        print("\nCommand-line config overrides:")
+        for key, value in overrides.items():
+            old_value = getattr(config, key, '<NEW>')
+            setattr(config, key, value)
+            print(f"  {key}: {old_value} -> {value}")
+        print()
+    
+    return config
 
 
 if __name__ == '__main__':
     # Parse command line arguments
-    cmd_args = parse_arguments()
+    cmd_args, override_args = parse_arguments()
     
     # Load configuration from YAML file
     config_path = cmd_args.config
@@ -549,6 +638,9 @@ if __name__ == '__main__':
     
     # Load configuration
     args = load_config(config_path)
+    
+    # Apply command-line overrides (before mode override, so --mode still wins)
+    args = apply_overrides(args, override_args)
     
     # Override evaluate_gen based on mode
     if cmd_args.mode == 'sample':
