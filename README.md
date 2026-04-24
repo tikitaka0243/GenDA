@@ -10,8 +10,6 @@ Official code repository for the paper: *"Global 3D Ocean Data Assimilation with
 - Python >= 3.13
 - PyTorch >= 2.0
 - xarray, numpy, pandas, matplotlib, cartopy
-- copernicusmarine (for data download)
-- argopy (for Argo data processing)
 
 1. Create and activate the conda environment:
 
@@ -25,7 +23,7 @@ conda activate genda
 3. Install remaining dependencies:
 
 ```bash
-pip install pyyaml tensorboard pandas xarray netcdf4 tqdm einops matplotlib cartopy gdown
+pip install pyyaml tensorboard pandas xarray netcdf4 tqdm einops matplotlib cartopy gdown scipy joblib scikit-learn xgboost
 ```
 
 ## Data Preparation
@@ -230,6 +228,69 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 --master_port=29500 mai
 ```
 
 Type inference is automatic: integers, floats, booleans (`true`/`false`), and null (`null`/`none`) are converted to the appropriate Python types. All other values are treated as strings.
+
+## Conformal Calibration
+
+Conformal calibration uses a calibration set to fit isotonic regression, then applies the fitted model to both calibration and test sets for calibrated prediction intervals and rank histograms.
+
+### Step 1: Sample on the Calibration Set
+
+Use `--sampling_dataset cal` to sample on the calibration set:
+
+**With pre-trained weights:**
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 --master_port=29500 main.py \
+    --mode sample \
+    --sampling_dataset cal \
+    --output_dir './output/results/genda' \
+    --resume './data' \
+    --checkpoint_name 'GenDA_checkpoint.pth' \
+    --val_sample_ratio 0.1 \
+    --run_prefix sample_cal
+```
+
+**With your own trained weights:**
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 --master_port=29500 main.py \
+    --mode sample \
+    --sampling_dataset cal \
+    --output_dir './output/results/genda' \
+    --resume './output/results/genda/<run_timestamp>' \
+    --checkpoint_name 'checkpoint-49.pth' \
+    --val_sample_ratio 0.1 \
+    --run_prefix sample_cal
+```
+
+> Replace `<run_timestamp>` with the actual folder name from your training run.
+>
+> **Note on `--val_sample_ratio`**: Conformal calibration is performed on the full calibration set, but using `--val_sample_ratio 0.1` (sampling only 10% of the calibration set) already yields very similar calibration results. You may increase this value to 1.0 for the most accurate calibration at the cost of longer sampling time.
+
+### Step 2: Run Conformal Calibration
+
+Run the calibration script with both calibration and test set sampling outputs:
+
+```bash
+python conformal_calibration.py \
+    --cal_sample_dir ./output/results/genda/sample_cal_YYYYMMDD_HHMMSS/samples \
+    --test_sample_dir ./output/results/genda/sample_test_YYYYMMDD_HHMMSS/samples
+```
+
+Both `--cal_sample_dir` and `--test_sample_dir` are required. Optional parameters:
+
+- `--cal_gt_dir`: Calibration set ground truth directory (default: `./data/glorys12/cal`).
+- `--test_gt_dir`: Test set ground truth directory (default: `./data/glorys12/test`).
+- `--cal_method`: Calibration method per variable as JSON (default: `xgboost` for thetao/so, `sklearn` for uo/vo).
+- `--pixel_coords`: Specific pixel coordinates to visualize as JSON (e.g., `'[[128,204],[116,386]]'`).
+
+Run `python conformal_calibration.py --help` for the full list of options.
+
+The script will generate:
+- **Pre-calibration rank histograms**: `rank_histogram_cal.png` and `rank_histogram_test.png`.
+- **Calibration model** (`isotonic_calibration.pkl`): Fitted on the calibration set only.
+- **Post-calibration rank histograms**: `calibrated_rank_histogram_cal.png` and `calibrated_rank_histogram_test.png`.
+- **Pixel distribution plots**: `pixel_distributions_cal.pdf` and `pixel_distributions_test.pdf`.
 
 ## License
 
