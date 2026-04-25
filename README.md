@@ -286,11 +286,38 @@ Both `--cal_sample_dir` and `--test_sample_dir` are required. Optional parameter
 
 Run `python conformal_calibration.py --help` for the full list of options.
 
-The script will generate:
-- **Pre-calibration rank histograms**: `rank_histogram_cal.png` and `rank_histogram_test.png`.
-- **Calibration model** (`isotonic_calibration.pkl`): Fitted on the calibration set only.
-- **Post-calibration rank histograms**: `calibrated_rank_histogram_cal.png` and `calibrated_rank_histogram_test.png`.
-- **Pixel distribution plots**: `pixel_distributions_cal.pdf` and `pixel_distributions_test.pdf`.
+The script will generate the following file structure:
+
+```
+{cal_sample_dir}/conformal/
+├── .cache/                              # Cache files for rank histograms (auto-generated, large files)
+│   ├── rank_histogram_cache_*.pkl       # Pre-calibration rank data cache
+│   └── calibrated_rank_histogram_cache_*.pkl  # Post-calibration rank data cache
+├── calibration_fit/                     # Calibration curve visualization for each variable
+│   ├── calibration_fit_thetao_xgboost.png
+│   ├── calibration_fit_so_xgboost.png
+│   ├── calibration_fit_uo_sklearn.png
+│   └── calibration_fit_vo_sklearn.png
+├── rank_histogram_cal.png               # Pre-calibration rank histogram (calibration set)
+├── calibrated_rank_histogram_cal.png    # Post-calibration rank histogram (calibration set)
+├── pixel_distributions_cal.pdf          # Pixel distribution visualization (calibration set)
+└── isotonic_calibration.pkl             # Fitted calibration model (used for test set)
+
+{test_sample_dir}/conformal/
+├── .cache/                              # Cache files for rank histograms
+│   ├── rank_histogram_cache_*.pkl
+│   └── calibrated_rank_histogram_cache_*.pkl
+├── rank_histogram_test.png              # Pre-calibration rank histogram (test set)
+├── calibrated_rank_histogram_test.png   # Post-calibration rank histogram (test set)
+└── pixel_distributions_test.pdf         # Pixel distribution visualization (test set)
+```
+
+**Output files explanation:**
+- **Rank histograms**: Show the calibration quality before and after conformal calibration
+- **Calibration model** (`isotonic_calibration.pkl`): Fitted on the calibration set only, then applied to both sets
+- **Calibration fit plots**: Visualize the learned isotonic regression/XGBoost calibration curves for each variable
+- **Pixel distributions**: Show the predictive distribution at selected pixel locations before and after calibration
+- **Cache files**: Large intermediate files (several GB) to avoid recomputation; can be safely deleted after analysis
 
 ## License
 
